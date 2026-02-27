@@ -210,18 +210,37 @@ async function computeHMAC(keyBytes, data) {
   return new Uint8Array(sig);
 }
 
+// Wartet auf eine BLE Notification mit Timeout
+function waitForNotification(characteristic, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      characteristic.removeEventListener('characteristicvaluechanged', handler);
+      reject(new Error('Timeout – keine Antwort vom Gerät'));
+    }, timeoutMs);
+
+    function handler(event) {
+      clearTimeout(timer);
+      characteristic.removeEventListener('characteristicvaluechanged', handler);
+      resolve(new Uint8Array(event.target.value.buffer)[0]);
+    }
+
+    characteristic.addEventListener('characteristicvaluechanged', handler);
+  });
+}
+
 async function openDoor(userID, name) {
   if (busy) return;
   setBusy(true);
 
   const icon = document.getElementById('doorIcon');
+  let device = null;
 
   try {
     // 1. BLE Gerät suchen
     setStatus('Suche Haustuer...', 'working', true);
     log(`${name}: Verbinde...`);
 
-    const device = await navigator.bluetooth.requestDevice({
+    device = await navigator.bluetooth.requestDevice({
       filters: [{ name: 'Haustuer' }],
       optionalServices: [SERVICE_UUID]
     });
@@ -239,27 +258,31 @@ async function openDoor(userID, name) {
     const responseChar  = await service.getCharacteristic(RESPONSE_UUID);
     const statusChar    = await service.getCharacteristic(STATUS_UUID);
 
-    // 4. Nonce lesen
+    // 4. Notifications aktivieren BEVOR wir die Response senden
+    //    → so verpassen wir die Antwort nicht, egal wie schnell der XIAO disconnectet
+    await statusChar.startNotifications();
+    const notificationPromise = waitForNotification(statusChar, 8000);
+
+    // 5. Nonce lesen
     setStatus('Lese Nonce...', 'working', true);
     const nonceValue = await challengeChar.readValue();
     const nonce      = new Uint8Array(nonceValue.buffer);
     log('Nonce: ' + Array.from(nonce).map(b => b.toString(16).padStart(2,'0')).join(''));
 
-    // 5. HMAC berechnen
+    // 6. HMAC berechnen
     const hmac = await computeHMAC(KEYS[userID], nonce);
     log('HMAC berechnet.');
 
-    // 6. UserID + HMAC senden (33 Bytes)
+    // 7. UserID + HMAC senden (33 Bytes)
     setStatus('Sende Authentifizierung...', 'working', true);
     const response = new Uint8Array(33);
     response[0] = userID;
     response.set(hmac, 1);
     await responseChar.writeValue(response);
 
-    // 7. Status lesen
-    await new Promise(r => setTimeout(r, 500));
-    const statusValue = await statusChar.readValue();
-    const statusByte  = new Uint8Array(statusValue.buffer)[0];
+    // 8. Auf Status-Notification warten (kein Polling mehr!)
+    setStatus('Warte auf Antwort...', 'working', true);
+    const statusByte = await notificationPromise;
 
     if (statusByte === 0x01) {
       log(`✅ Tür geöffnet! Willkommen ${name}!`);
@@ -275,14 +298,21 @@ async function openDoor(userID, name) {
       setStatus('❌ Zugang verweigert', 'error');
     }
 
-    await device.gatt.disconnect();
-
   } catch (err) {
-    log('Fehler: ' + err.message);
-    setStatus('Fehler: ' + err.message, 'error');
+    // FIX: err.message kann undefined sein bei BLE-Fehlern → Fallback
+    const msg = err?.message || err?.toString() || 'Unbekannter Fehler';
+    log('Fehler: ' + msg);
+    setStatus('⚠️ ' + msg, 'error');
   } finally {
+    // Verbindung sauber trennen falls noch offen
+    try {
+      if (device && device.gatt.connected) {
+        await device.gatt.disconnect();
+      }
+    } catch (_) {}
+
     setBusy(false);
-    setTimeout(() => setStatus('Bereit', 'idle'), 4000);
+    setTimeout(() => setStatus('Bereit', 'idle'), 5000);
   }
 }
 </script>
