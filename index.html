@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Haustür</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #1a1a2e;
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #888;
+      margin-bottom: 48px;
+    }
+
+    .door-icon {
+      font-size: 80px;
+      margin-bottom: 40px;
+      transition: transform 0.3s;
+    }
+
+    .door-icon.open {
+      transform: perspective(200px) rotateY(-30deg);
+    }
+
+    .btn-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .btn {
+      padding: 20px;
+      border-radius: 16px;
+      border: none;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      letter-spacing: -0.3px;
+    }
+
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-andreas {
+      background: linear-gradient(135deg, #0066ff, #0044cc);
+      color: white;
+    }
+
+    .btn-britta {
+      background: linear-gradient(135deg, #cc44aa, #992288);
+      color: white;
+    }
+
+    .status {
+      margin-top: 32px;
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 500;
+      text-align: center;
+      max-width: 320px;
+      width: 100%;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+    }
+
+    .status.idle     { background: #2a2a3e; color: #888; }
+    .status.working  { background: #1a3a5c; color: #4499ff; }
+    .status.success  { background: #1a3a1a; color: #44cc44; }
+    .status.error    { background: #3a1a1a; color: #ff4444; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .log {
+      margin-top: 24px;
+      width: 100%;
+      max-width: 320px;
+      background: #111122;
+      border-radius: 12px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #666;
+      max-height: 140px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="door-icon" id="doorIcon">🚪</div>
+  <h1>Haustür</h1>
+  <p class="subtitle">BLE Türsteuerung</p>
+
+  <div class="btn-container">
+    <button class="btn btn-andreas" id="btnAndreas" onclick="openDoor(0x01, 'Andreas')">
+      👤 Andreas öffnen
+    </button>
+    <button class="btn btn-britta" id="btnBritta" onclick="openDoor(0x02, 'Britta')">
+      👤 Britta öffnen
+    </button>
+  </div>
+
+  <div class="status idle" id="status">Bereit</div>
+  <div class="log" id="log"></div>
+
+<script>
+// ════════════════════════════════════════════════
+// KONFIGURATION – muss mit Arduino-Code übereinstimmen!
+// ════════════════════════════════════════════════
+
+const SERVICE_UUID   = "a1b2c3d4-1234-1234-1234-123456789abc";
+const CHALLENGE_UUID = "a1b2c3d4-1234-1234-1234-123456789abd";
+const RESPONSE_UUID  = "a1b2c3d4-1234-1234-1234-123456789abe";
+const STATUS_UUID    = "a1b2c3d4-1234-1234-1234-123456789abf";
+
+// Schlüssel – IDENTISCH zum Arduino-Code!
+const KEYS = {
+  0x01: [ // Andreas
+    0x90, 0xB8, 0x4F, 0x4C, 0xEE, 0xA5, 0x03, 0xB9,
+    0xBA, 0x4D, 0xD0, 0x53, 0x53, 0xEC, 0x2B, 0x22,
+    0xCF, 0xD4, 0x18, 0x8B, 0x07, 0x38, 0x5C, 0x52,
+    0xD9, 0xE9, 0x71, 0x59, 0x54, 0x6B, 0x40, 0x76
+  ],
+  0x02: [ // Britta
+    0x10, 0x7D, 0xD9, 0x46, 0x5F, 0xBE, 0x1B, 0x4A,
+    0xB5, 0x4F, 0x9A, 0x93, 0x1D, 0xE3, 0x43, 0x8B,
+    0x03, 0xAD, 0x92, 0xD3, 0xB4, 0xB7, 0x30, 0xED,
+    0xAF, 0x73, 0x90, 0x18, 0x27, 0xFC, 0x71, 0x46
+  ]
+};
+
+// ════════════════════════════════════════════════
+
+let busy = false;
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const t  = new Date().toTimeString().slice(0,8);
+  el.innerHTML += `[${t}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(msg, type = 'idle', spinner = false) {
+  const el = document.getElementById('status');
+  el.className = `status ${type}`;
+  el.innerHTML = spinner
+    ? `<span class="spinner"></span>${msg}`
+    : msg;
+}
+
+function setBusy(val) {
+  busy = val;
+  document.getElementById('btnAndreas').disabled = val;
+  document.getElementById('btnBritta').disabled  = val;
+}
+
+// HMAC-SHA256 berechnen
+async function computeHMAC(keyBytes, data) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', new Uint8Array(keyBytes),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', keyMaterial, data);
+  return new Uint8Array(sig);
+}
+
+async function openDoor(userID, name) {
+  if (busy) return;
+  setBusy(true);
+
+  const icon = document.getElementById('doorIcon');
+
+  try {
+    // 1. BLE Gerät suchen
+    setStatus('Suche Haustuer...', 'working', true);
+    log(`${name}: Verbinde...`);
+
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'Haustuer' }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    log('Gerät gefunden: ' + device.name);
+    setStatus('Verbinde...', 'working', true);
+
+    // 2. Verbinden
+    const server = await device.gatt.connect();
+    log('GATT verbunden.');
+
+    // 3. Service & Characteristics holen
+    const service       = await server.getPrimaryService(SERVICE_UUID);
+    const challengeChar = await service.getCharacteristic(CHALLENGE_UUID);
+    const responseChar  = await service.getCharacteristic(RESPONSE_UUID);
+    const statusChar    = await service.getCharacteristic(STATUS_UUID);
+
+    // 4. Nonce lesen
+    setStatus('Lese Nonce...', 'working', true);
+    const nonceValue = await challengeChar.readValue();
+    const nonce      = new Uint8Array(nonceValue.buffer);
+    log('Nonce: ' + Array.from(nonce).map(b => b.toString(16).padStart(2,'0')).join(''));
+
+    // 5. HMAC berechnen
+    const hmac = await computeHMAC(KEYS[userID], nonce);
+    log('HMAC berechnet.');
+
+    // 6. UserID + HMAC senden (33 Bytes)
+    setStatus('Sende Authentifizierung...', 'working', true);
+    const response = new Uint8Array(33);
+    response[0] = userID;
+    response.set(hmac, 1);
+    await responseChar.writeValue(response);
+
+    // 7. Status lesen
+    await new Promise(r => setTimeout(r, 500));
+    const statusValue = await statusChar.readValue();
+    const statusByte  = new Uint8Array(statusValue.buffer)[0];
+
+    if (statusByte === 0x01) {
+      log(`✅ Tür geöffnet! Willkommen ${name}!`);
+      setStatus(`✅ Willkommen, ${name}!`, 'success');
+      icon.textContent = '🔓';
+      icon.classList.add('open');
+      setTimeout(() => {
+        icon.textContent = '🚪';
+        icon.classList.remove('open');
+      }, 3000);
+    } else {
+      log('❌ Zugang verweigert.');
+      setStatus('❌ Zugang verweigert', 'error');
+    }
+
+    await device.gatt.disconnect();
+
+  } catch (err) {
+    log('Fehler: ' + err.message);
+    setStatus('Fehler: ' + err.message, 'error');
+  } finally {
+    setBusy(false);
+    setTimeout(() => setStatus('Bereit', 'idle'), 4000);
+  }
+}
+</script>
+</body>
+</html>
