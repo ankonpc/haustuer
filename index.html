@@ -293,6 +293,9 @@ async function openDoor(userID, name) {
         icon.textContent = '🚪';
         icon.classList.remove('open');
       }, 3000);
+    } else if (statusByte === 0x02) {
+      log('⏳ Cooldown aktiv – bitte kurz warten.');
+      setStatus('⏳ Bitte warten...', 'error');
     } else {
       log('❌ Zugang verweigert.');
       setStatus('❌ Zugang verweigert', 'error');
