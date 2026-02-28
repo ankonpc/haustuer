@@ -269,6 +269,14 @@ async function openDoor(userID, name) {
     const nonce      = new Uint8Array(nonceValue.buffer);
     log('Nonce: ' + Array.from(nonce).map(b => b.toString(16).padStart(2,'0')).join(''));
 
+
+    // Cooldown-Erkennung: alle 0xFF = Geraet im Cooldown
+    if (nonce.every(b => b === 0xFF)) {
+      log("⏳ Cooldown aktiv – bitte kurz warten.");
+      setStatus("⏳ Bitte warten (Cooldown)", "error");
+      try { await device.gatt.disconnect(); } catch(_) {}
+      return;
+    }
     // 6. HMAC berechnen
     const hmac = await computeHMAC(KEYS[userID], nonce);
     log('HMAC berechnet.');
@@ -306,18 +314,4 @@ async function openDoor(userID, name) {
     const msg = err?.message || err?.toString() || 'Unbekannter Fehler';
     log('Fehler: ' + msg);
     setStatus('⚠️ ' + msg, 'error');
-  } finally {
-    // Verbindung sauber trennen falls noch offen
-    try {
-      if (device && device.gatt.connected) {
-        await device.gatt.disconnect();
-      }
-    } catch (_) {}
-
-    setBusy(false);
-    setTimeout(() => setStatus('Bereit', 'idle'), 5000);
-  }
-}
-</script>
-</body>
-</html>
+  } finally 
