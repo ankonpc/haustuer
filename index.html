@@ -258,39 +258,36 @@ async function openDoor(userID, name) {
     const responseChar  = await service.getCharacteristic(RESPONSE_UUID);
     const statusChar    = await service.getCharacteristic(STATUS_UUID);
 
-    // 4. Notifications aktivieren BEVOR wir die Response senden
-    //    → so verpassen wir die Antwort nicht, egal wie schnell der XIAO disconnectet
-    await statusChar.startNotifications();
-    const notificationPromise = waitForNotification(statusChar, 8000);
-
-    // 5. Nonce lesen
+    // 4. Nonce lesen
     setStatus('Lese Nonce...', 'working', true);
     const nonceValue = await challengeChar.readValue();
     const nonce      = new Uint8Array(nonceValue.buffer);
     log('Nonce: ' + Array.from(nonce).map(b => b.toString(16).padStart(2,'0')).join(''));
 
-
-    // Cooldown-Erkennung: alle 0xFF = Geraet im Cooldown
+    // Cooldown-Erkennung: alle 0xFF = Gerät im Cooldown
     if (nonce.every(b => b === 0xFF)) {
-      log("⏳ Cooldown aktiv – bitte kurz warten.");
-      setStatus("⏳ Bitte warten (Cooldown)", "error");
+      log('⏳ Cooldown aktiv – bitte kurz warten.');
+      setStatus('⏳ Bitte warten (Cooldown)', 'error');
       try { await device.gatt.disconnect(); } catch(_) {}
       return;
     }
-    // 6. HMAC berechnen
+
+    // 5. HMAC berechnen
     const hmac = await computeHMAC(KEYS[userID], nonce);
     log('HMAC berechnet.');
 
-    // 7. UserID + HMAC senden (33 Bytes)
+    // 6. UserID + HMAC senden (33 Bytes)
     setStatus('Sende Authentifizierung...', 'working', true);
     const response = new Uint8Array(33);
     response[0] = userID;
     response.set(hmac, 1);
     await responseChar.writeValue(response);
 
-    // 8. Auf Status-Notification warten (kein Polling mehr!)
+    // 7. Status per Polling lesen (XIAO wartet 500ms vor Disconnect)
     setStatus('Warte auf Antwort...', 'working', true);
-    const statusByte = await notificationPromise;
+    await new Promise(r => setTimeout(r, 600));
+    const statusValue = await statusChar.readValue();
+    const statusByte  = new Uint8Array(statusValue.buffer)[0];
 
     if (statusByte === 0x01) {
       log(`✅ Tür geöffnet! Willkommen ${name}!`);
@@ -314,4 +311,18 @@ async function openDoor(userID, name) {
     const msg = err?.message || err?.toString() || 'Unbekannter Fehler';
     log('Fehler: ' + msg);
     setStatus('⚠️ ' + msg, 'error');
-  } finally 
+  } finally {
+    // Verbindung sauber trennen falls noch offen
+    try {
+      if (device && device.gatt.connected) {
+        await device.gatt.disconnect();
+      }
+    } catch (_) {}
+
+    setBusy(false);
+    setTimeout(() => setStatus('Bereit', 'idle'), 5000);
+  }
+}
+</script>
+</body>
+</html>
