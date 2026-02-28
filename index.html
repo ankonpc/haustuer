@@ -149,6 +149,24 @@
   <div class="log" id="log"></div>
 
 <script>
+// Globaler Fehler-Handler – zeigt JS-Fehler im Log
+window.onerror = function(msg, src, line) {
+  const el = document.getElementById('log');
+  if (el) el.innerHTML += `[ERR] ${msg} (Zeile ${line})
+`;
+  document.getElementById('status').innerHTML = '⚠️ JS-Fehler: ' + msg;
+  document.getElementById('status').className = 'status error';
+};
+
+// Prüfen ob crypto.subtle verfügbar
+if (!window.crypto || !window.crypto.subtle) {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('status').innerHTML = '⚠️ Kein HTTPS! crypto.subtle nicht verfügbar.';
+    document.getElementById('status').className = 'status error';
+    document.getElementById('log').innerHTML = '[ERR] Seite muss über HTTPS geladen werden!\n';
+  });
+}
+
 // ════════════════════════════════════════════════
 // KONFIGURATION – muss mit Arduino-Code übereinstimmen!
 // ════════════════════════════════════════════════
