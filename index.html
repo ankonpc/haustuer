@@ -299,7 +299,7 @@ async function openDoor(userID, name) {
     const response = new Uint8Array(33);
     response[0] = userID;
     response.set(hmac, 1);
-    await responseChar.writeValue(response);
+    await responseChar.writeValueWithoutResponse(response);
 
     // 7. Status per Polling lesen (XIAO wartet 500ms vor Disconnect)
     setStatus('Warte auf Antwort...', 'working', true);
